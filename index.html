@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Professional GST Bill Master</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Babel for on-the-fly JSX transpilation (Required for Blogger/Single-file) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        @media print {
+            .no-print { display: none !important; }
+            body { background-color: white !important; padding: 0 !important; margin: 0 !important; }
+            @page { margin: 10mm; }
+            .preview-container { padding: 0 !important; display: block !important; }
+            .preview-card { box-shadow: none !important; width: 100% !important; max-width: none !important; border: none !important; }
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+    <!-- Import Map for ESM Modules -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom": "https://esm.sh/react-dom@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react",
+        "@google/genai": "https://esm.sh/@google/genai@1.41.0"
+      }
+    }
+    </script>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <!-- Use text/babel for JSX and data-type="module" to support ESM imports -->
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { 
+          Calculator, ReceiptText, Printer, Plus, Trash2, Sparkles, 
+          Building2, UserCircle, ShoppingBag, Landmark 
+        } from 'lucide-react';
+        import { GoogleGenAI, Type } from "@google/genai";
+
+        // --- CONSTANTS ---
+        const INDIAN_STATES = [
+          "Andaman and Nicobar Islands", "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", 
+          "Chandigarh", "Chhattisgarh", "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Goa", 
+          "Gujarat", "Haryana", "Himachal Pradesh", "Jammu and Kashmir", "Jharkhand", "Karnataka", 
+          "Kerala", "Ladakh", "Lakshadweep", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", 
+          "Mizoram", "Nagaland", "Odisha", "Puducherry", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", 
+          "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal"
+        ];
+
+        // --- SERVICES ---
+        const getSmartProductInfo = async (query) => {
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          try {
+            const response = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: `Suggest a standard HSN code and professional description for: ${query}`,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    hsn: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    suggestedTaxRate: { type: Type.NUMBER }
+                  },
+                  required: ["hsn", "description", "suggestedTaxRate"]
+                }
+              }
+            });
+            return JSON.parse(response.text);
+          } catch (error) {
+            console.error("Gemini Error:", error);
+            return null;
+          }
+        };
+
+        // --- PREVIEW COMPONENT ---
+        const InvoicePreview = ({ data }) => {
+          const totals = useMemo(() => {
+            let taxableAmount = 0;
+            let totalTax = 0;
+            data.items.forEach(item => {
+              const lineTotal = item.quantity * item.rate;
+              taxableAmount += lineTotal;
+              totalTax += (lineTotal * item.taxRate) / 100;
+            });
+            return {
+              taxableAmount,
+              totalTax,
+              grandTotal: taxableAmount + totalTax
+            };
+          }, [data.items]);
+
+          const formatCurrency = (val) => 
+            new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(val);
+
+          return (
+            <div className="bg-white text-slate-900 p-8 md:p-12 shadow-2xl font-serif preview-card border border-slate-200">
+              <div className="flex justify-between items-start border-b-4 border-slate-900 pb-8 mb-8">
+                <div>
+                  <h2 className="text-3xl font-black text-indigo-900 mb-2 uppercase tracking-tight">TAX INVOICE</h2>
+                  <div className="font-bold text-xl uppercase tracking-wide">{data.seller.name || "YOUR SHOP NAME"}</div>
+                  <p className="max-w-[300px] text-xs text-slate-600 uppercase leading-relaxed">{data.seller.address}</p>
+                  <div className="mt-3 space-y-0.5">
+                    <p className="text-xs font-bold">GSTIN: <span className="text-indigo-700 font-black">{data.seller.gstin || "NOT PROVIDED"}</span></p>
+                    <p className="text-xs">STATE: <span className="font-bold">{data.seller.state}</span></p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="bg-indigo-50 px-4 py-2 rounded-lg border border-indigo-100 mb-4 inline-block">
+                    <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">Invoice Number</p>
+                    <p className="text-xl font-black text-indigo-900 leading-none">#{data.invoiceNumber}</p>
+                  </div>
+                  <div className="text-xs">
+                    <p className="text-slate-400 font-bold uppercase mb-1">Date of Issue</p>
+                    <p className="font-black text-slate-800">{new Date(data.invoiceDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-12 mb-10 text-xs">
+                <div>
+                  <p className="text-slate-400 font-bold uppercase mb-2 tracking-widest border-b pb-1">Billed To:</p>
+                  <p className="font-black text-base uppercase text-slate-900">{data.buyer.name || "CUSTOMER NAME"}</p>
+                  <p className="text-slate-600 uppercase leading-relaxed mt-1">{data.buyer.address || "No Address Provided"}</p>
+                  <p className="font-bold mt-2">GSTIN: <span className="text-indigo-700">{data.buyer.gstin || "UNREGISTERED"}</span></p>
+                </div>
+                <div className="text-right flex flex-col items-end">
+                  <p className="text-slate-400 font-bold uppercase mb-2 tracking-widest border-b pb-1 w-full">Remittance Info:</p>
+                  <p className="font-bold text-slate-800">{data.bankDetails.name || "BANK NAME NOT SET"}</p>
+                  <p className="text-slate-500">A/C: <span className="font-bold text-slate-800">{data.bankDetails.accountNumber || "XXXX"}</span></p>
+                  <p className="text-slate-500">IFSC: <span className="font-bold text-slate-800">{data.bankDetails.ifsc || "XXXX"}</span></p>
+                </div>
+              </div>
+
+              <table className="w-full text-left border-collapse mb-10 text-[12px]">
+                <thead className="bg-slate-900 text-white uppercase font-black tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">Description of Goods</th>
+                    <th className="py-3 px-4">HSN</th>
+                    <th className="py-3 px-4 text-center">Qty</th>
+                    <th className="py-3 px-4 text-right">Rate</th>
+                    <th className="py-3 px-4 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="border-b-2 border-slate-200">
+                  {data.items.map((item, idx) => (
+                    <tr key={idx} className="border-b border-slate-100 last:border-none">
+                      <td className="py-4 px-4 font-bold uppercase text-slate-800">{item.description || "PRODUCT NAME"}</td>
+                      <td className="py-4 px-4 text-slate-500 font-mono">{item.hsn || "-"}</td>
+                      <td className="py-4 px-4 text-center">{item.quantity}</td>
+                      <td className="py-4 px-4 text-right">{formatCurrency(item.rate)}</td>
+                      <td className="py-4 px-4 text-right font-black text-slate-900">{formatCurrency(item.quantity * item.rate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="flex justify-end mb-12">
+                <div className="w-72 space-y-3 text-xs">
+                  <div className="flex justify-between text-slate-600 font-medium">
+                    <span>Taxable Value</span>
+                    <span>{formatCurrency(totals.taxableAmount)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600 border-b border-slate-100 pb-2 font-medium">
+                    <span>GST ({data.isInterState ? 'IGST' : 'CGST+SGST'})</span>
+                    <span>{formatCurrency(totals.totalTax)}</span>
+                  </div>
+                  <div className="pt-2 flex justify-between items-center text-indigo-900 font-black">
+                    <span className="text-sm uppercase tracking-widest">Total Amount</span>
+                    <span className="text-2xl tracking-tighter">{formatCurrency(totals.grandTotal)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-auto pt-10 border-t border-slate-100 flex justify-between items-end text-[10px] uppercase font-bold tracking-widest text-slate-400">
+                <div className="space-y-1">
+                  <p className="text-slate-600">Declaration:</p>
+                  <p>1. Goods once sold will not be taken back.</p>
+                  <p>2. Interest @18% will be charged if payment not made within 30 days.</p>
+                </div>
+                <div className="text-right">
+                  <div className="h-14 w-48 border-b-2 border-slate-900 mb-2 bg-slate-50/50"></div>
+                  <p className="text-slate-900">Authorised Signatory</p>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // --- MAIN APP COMPONENT ---
+        const App = () => {
+          const [data, setData] = useState({
+            invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 8999)}`,
+            invoiceDate: new Date().toISOString().split('T')[0],
+            seller: { name: "", address: "", gstin: "", state: "Maharashtra" },
+            buyer: { name: "", address: "", gstin: "", state: "Maharashtra" },
+            items: [{ id: '1', description: '', hsn: '', quantity: 1, rate: 0, taxRate: 18 }],
+            isInterState: false,
+            bankDetails: { name: "", accountNumber: "", ifsc: "" }
+          });
+
+          useEffect(() => {
+            setData(prev => ({ ...prev, isInterState: prev.seller.state !== prev.buyer.state }));
+          }, [data.seller.state, data.buyer.state]);
+
+          const updateItem = (idx, updates) => {
+            const items = [...data.items];
+            items[idx] = { ...items[idx], ...updates };
+            setData({ ...data, items });
+          };
+
+          const handleSmartFill = async (idx) => {
+            const res = await getSmartProductInfo(data.items[idx].description);
+            if (res) updateItem(idx, { hsn: res.hsn, taxRate: res.suggestedTaxRate, description: res.description });
+          };
+
+          return (
+            <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
+              {/* SIDEBAR FORM */}
+              <div className="w-full lg:w-[480px] bg-white border-r border-slate-200 p-6 no-print overflow-y-auto lg:h-screen">
+                <div className="flex items-center gap-3 mb-10 text-indigo-600">
+                  <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-200">
+                    <Calculator className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h1 className="text-2xl font-black tracking-tighter uppercase leading-none">BILL MASTER</h1>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">GST Invoice Expert</span>
+                  </div>
+                </div>
+
+                <div className="space-y-8">
+                  <section className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-4">
+                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                      <Building2 size={14} /> My Business Profile
+                    </h3>
+                    <input placeholder="Legal Shop Name" className="w-full p-3 border-2 border-slate-200 rounded-xl text-sm focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 outline-none transition-all" value={data.seller.name} onChange={e => setData({...data, seller: {...data.seller, name: e.target.value}})} />
+                    <input placeholder="GSTIN (e.g. 27AAAAA0000A1Z5)" className="w-full p-3 border-2 border-slate-200 rounded-xl text-sm uppercase font-mono focus:border-indigo-500 outline-none" value={data.seller.gstin} onChange={e => setData({...data, seller: {...data.seller, gstin: e.target.value.toUpperCase()}})} />
+                    <textarea placeholder="Complete Shop Address" rows="2" className="w-full p-3 border-2 border-slate-200 rounded-xl text-sm focus:border-indigo-500 outline-none" value={data.seller.address} onChange={e => setData({...data, seller: {...data.seller, address: e.target.value}})} />
+                    <select className="w-full p-3 border-2 border-slate-200 rounded-xl text-sm font-bold text-slate-600" value={data.seller.state} onChange={e => setData({...data, seller: {...data.seller, state: e.target.value}})}>
+                      {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </section>
+
+                  <section className="bg-white p-4 rounded-2xl border-2 border-slate-100 space-y-4">
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                      <UserCircle size={14} /> Customer Details
+                    </h3>
+                    <input placeholder="Customer/Company Name" className="w-full p-3 border-2 border-slate-200 rounded-xl text-sm" value={data.buyer.name} onChange={e => setData({...data, buyer: {...data.buyer, name: e.target.value}})} />
+                    <input placeholder="Customer GSTIN (Optional)" className="w-full p-3 border-2 border-slate-200 rounded-xl text-sm uppercase font-mono" value={data.buyer.gstin} onChange={e => setData({...data, buyer: {...data.buyer, gstin: e.target.value.toUpperCase()}})} />
+                    <textarea placeholder="Billing Address" rows="2" className="w-full p-3 border-2 border-slate-200 rounded-xl text-sm" value={data.buyer.address} onChange={e => setData({...data, buyer: {...data.buyer, address: e.target.value}})} />
+                    <select className="w-full p-3 border-2 border-slate-200 rounded-xl text-sm" value={data.buyer.state} onChange={e => setData({...data, buyer: {...data.buyer, state: e.target.value}})}>
+                      {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </section>
+
+                  <section className="space-y-4">
+                    <div className="flex justify-between items-center px-1">
+                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                        <ShoppingBag size={14} /> Itemized Billing
+                      </h3>
+                      <button 
+                        onClick={() => setData({...data, items: [...data.items, {id: Date.now().toString(), description: '', hsn: '', quantity: 1, rate: 0, taxRate: 18}]})}
+                        className="bg-indigo-600 text-white p-2 rounded-lg hover:rotate-90 transition-all duration-300 shadow-lg shadow-indigo-100"
+                      >
+                        <Plus size={18} />
+                      </button>
+                    </div>
+                    {data.items.map((item, idx) => (
+                      <div key={item.id} className="p-4 border-2 border-slate-100 rounded-2xl bg-white space-y-3 relative group hover:border-indigo-200 transition-all shadow-sm">
+                        <button 
+                          onClick={() => setData({...data, items: data.items.filter((_, i) => i !== idx)})}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 size={12}/>
+                        </button>
+                        <div className="flex gap-2">
+                          <input placeholder="Item Description" className="flex-1 p-3 border-2 border-slate-100 rounded-xl text-sm focus:border-indigo-400 outline-none" value={item.description} onChange={e => updateItem(idx, {description: e.target.value})} />
+                          <button 
+                            onClick={() => handleSmartFill(idx)} 
+                            className="p-3 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                          >
+                            <Sparkles size={18}/>
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2">
+                          <input placeholder="HSN" className="col-span-1 p-2 border-2 border-slate-100 rounded-xl text-xs font-mono" value={item.hsn} onChange={e => updateItem(idx, {hsn: e.target.value})} />
+                          <input type="number" placeholder="Qty" className="col-span-1 p-2 border-2 border-slate-100 rounded-xl text-xs" value={item.quantity} onChange={e => updateItem(idx, {quantity: Number(e.target.value)})} />
+                          <input type="number" placeholder="Rate" className="col-span-1 p-2 border-2 border-slate-100 rounded-xl text-xs" value={item.rate} onChange={e => updateItem(idx, {rate: Number(e.target.value)})} />
+                          <select className="col-span-1 p-2 border-2 border-slate-100 rounded-xl text-[10px] font-bold" value={item.taxRate} onChange={e => updateItem(idx, {taxRate: Number(e.target.value)})}>
+                            <option value="5">5%</option>
+                            <option value="12">12%</option>
+                            <option value="18">18%</option>
+                            <option value="28">28%</option>
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+
+                  <section className="bg-slate-900 p-5 rounded-3xl space-y-4 shadow-2xl shadow-slate-200">
+                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                      <Landmark size={14} /> Settlement Details
+                    </h3>
+                    <input placeholder="Bank Name & Branch" className="w-full p-3 bg-slate-800 border-none rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500" value={data.bankDetails.name} onChange={e => setData({...data, bankDetails: {...data.bankDetails, name: e.target.value}})} />
+                    <input placeholder="Account Number" className="w-full p-3 bg-slate-800 border-none rounded-xl text-sm text-white font-mono placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500" value={data.bankDetails.accountNumber} onChange={e => setData({...data, bankDetails: {...data.bankDetails, accountNumber: e.target.value}})} />
+                    <input placeholder="IFSC Code" className="w-full p-3 bg-slate-800 border-none rounded-xl text-sm text-white font-mono uppercase placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500" value={data.bankDetails.ifsc} onChange={e => setData({...data, bankDetails: {...data.bankDetails, ifsc: e.target.value.toUpperCase()}})} />
+                  </section>
+
+                  <section className="pb-12 px-2">
+                    <button 
+                      onClick={() => window.print()} 
+                      className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl flex items-center justify-center gap-3 hover:bg-indigo-700 shadow-2xl shadow-indigo-200 active:scale-[0.98] transition-all text-lg tracking-tight"
+                    >
+                      <Printer size={24} /> PRINT / SAVE INVOICE
+                    </button>
+                    <p className="text-[10px] text-center mt-4 text-slate-400 font-bold uppercase tracking-widest">Supports A4 Printing & PDF Export</p>
+                  </section>
+                </div>
+              </div>
+
+              {/* LIVE PREVIEW CANVAS */}
+              <div className="flex-1 bg-slate-100 p-4 md:p-12 overflow-y-auto h-screen flex justify-center preview-container">
+                <div className="w-full max-w-[850px] h-fit">
+                  <InvoicePreview data={data} />
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // Render the application
+        const rootElement = document.getElementById('root');
+        if (rootElement) {
+          const root = ReactDOM.createRoot(rootElement);
+          root.render(<React.StrictMode><App /></React.StrictMode>);
+        }
+    </script>
+</body>
+</html>
